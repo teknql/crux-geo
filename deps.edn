@@ -1,0 +1,8 @@
+{:paths ["src"]
+ :deps
+ {org.locationtech.jts/jts-core {:mvn/version "1.18.1"}}
+
+ :aliases
+ {:dev
+  {:extra-deps
+   {juxt/crux-core {:mvn/version "21.04-1.16.0-beta"}}}}}
