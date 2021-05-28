@@ -104,12 +104,18 @@
 
 (defn index!
   "Index the provided documents into the passed in r-tree"
-  [ar-tree* ^GeometryFactory geo-factory docs]
+  [{:keys [r-trees
+           index-store
+           ^GeometryFactory geo-factory]} docs]
   (doseq [[_id doc] docs
           [k v]     doc
-          :let      [geo (->geo geo-factory v)]
+          :let      [geo         (->geo geo-factory v)
+                     known-attrs (set (keys @r-trees))]
           :when     geo
-          :let      [r-tree (a->rtree ar-tree* k)]]
+          :let      [r-tree    (a->rtree r-trees k)
+                     new-attrs (set (keys @r-trees))]]
+    (when (not= known-attrs new-attrs)
+      (db/store-index-meta index-store ::known-attrs new-attrs))
     (.insert r-tree (.getEnvelopeInternal geo) geo)))
 
 
@@ -193,17 +199,27 @@
                  :index-store    :crux/index-store
                  :query-engine   :crux/query-engine}
    ::sys/before #{[:crux/tx-ingester]}}
-  [{:keys [document-store bus query-engine srid precision]}]
-  (let [ar-tree*    (atom {})
-        geo-factory (GeometryFactory.
-                      (case precision
-                        :floating (PrecisionModel.))
-                      srid)]
-    (q/assoc-pred-ctx! query-engine ::geo-store {:r-trees     ar-tree*
-                                                 :geo-factory geo-factory})
+  [{:keys [document-store bus query-engine srid precision index-store]}]
+  (let [ctx {:r-trees     (atom (into {}
+                                      (for [attr (db/read-index-meta index-store ::known-attrs)
+                                            :let [r-tree (STRtree.)]]
+                                        [attr r-tree])))
+             :index-store index-store
+             :geo-factory (GeometryFactory.
+                            (case precision
+                              :floating (PrecisionModel.))
+                            srid)}]
+    (with-open [index-snapshot (db/open-index-snapshot index-store)]
+      (doseq [attr  (keys @(:r-trees ctx))
+              :let  [^STRtree r-tree (get @(:r-trees ctx) attr)]
+              v     (db/av index-snapshot attr nil)
+              :let  [v (db/decode-value index-snapshot v)
+                     geo (->geo (:geo-factory ctx) v)]
+              :when geo]
+        (.insert r-tree (.getEnvelopeInternal geo) geo)))
+    (q/assoc-pred-ctx! query-engine ::geo-store ctx)
     (bus/listen bus {:crux/event-types  #{:crux.tx/committing-tx :crux.tx/aborting-tx}
                      :crux.bus/executor (reify java.util.concurrent.Executor
                                           (execute [_ f]
                                             (.run f)))}
-                #(index! ar-tree* geo-factory (db/fetch-docs document-store (:doc-ids %))))
-    ar-tree*))
+                #(index! ctx (db/fetch-docs document-store (:doc-ids %))))))

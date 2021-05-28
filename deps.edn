@@ -3,6 +3,7 @@
  {org.locationtech.jts/jts-core {:mvn/version "1.18.1"}}
 
  :aliases
- {:dev
+ {:test
   {:extra-deps
-   {juxt/crux-core {:mvn/version "21.04-1.16.0-beta"}}}}}
+   {juxt/crux-core    {:mvn/version "21.05-1.17.0-beta"}
+    juxt/crux-rocksdb {:mvn/version "21.05-1.17.0-beta"}}}}}

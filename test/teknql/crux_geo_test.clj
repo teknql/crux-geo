@@ -1,14 +1,17 @@
 (ns teknql.crux-geo-test
   (:require [clojure.test :refer [deftest testing is use-fixtures]]
             [crux.api :as crux]
-            [teknql.crux-geo :as sut]))
+            [teknql.crux-geo :as sut]
+            [crux.db :as db]
+            [clojure.java.io :as io]))
 
 (def ^:dynamic *node* nil)
 
 (defn geo-fixture
   [f]
   (binding [*node* (crux/start-node {:teknql.crux-geo/geo-store {}})]
-    (f)))
+    (f)
+    (.close *node*)))
 
 (defn submit+await-tx
   [tx]
@@ -99,3 +102,23 @@
                :where    [[?ny :crux.db/id :db.id/new-york]
                           [?ny :city/location ?loc]
                           [(geo-nearest :city/location ?loc 2) [[?nearest]]]]})))))
+
+(deftest persistence-test
+  (let [node-cfg {:crux/index-store
+                  {:kv-store {:crux/module 'crux.rocksdb/->kv-store
+                              :db-dir      (io/file "/tmp/rocksdb")}}
+                  :teknql.crux-geo/geo-store {}}]
+    (binding [*node* (crux/start-node node-cfg)]
+      (submit+await-tx (for [city cities] [:crux.tx/put city]))
+      (.close *node*))
+
+    (binding [*node* (crux/start-node node-cfg)]
+      (is (= [[:db.id/boston]]
+             (crux/q
+               (crux/db *node*)
+               '{:find     [?nearest]
+                 :order-by [[?nearest :asc]]
+                 :where    [[?ny :crux.db/id :db.id/new-york]
+                            [?ny :city/location ?loc]
+                            [(geo-nearest :city/location ?loc) [[?nearest]]]]})))
+      (.close *node*))))
