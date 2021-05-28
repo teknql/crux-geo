@@ -118,6 +118,24 @@
       (db/store-index-meta index-store ::known-attrs new-attrs))
     (.insert r-tree (.getEnvelopeInternal geo) geo)))
 
+(defn evict!
+  "Evict the provided document IDs"
+  [{:keys [index-store
+           geo-factory
+           r-trees]} eids]
+  (with-open [index-snapshot (db/open-index-snapshot index-store)]
+    (doseq [[a v] (db/exclusive-avs index-store eids)
+            :let  [a (db/decode-value index-snapshot a)
+                   ^STRtree r-tree (get @r-trees a)]
+            :when r-tree
+            :let  [v   (db/decode-value index-snapshot v)
+                   geo (->geo geo-factory v)
+                   env (.getEnvelopeInternal geo)]
+            :when geo]
+      (doseq [^Geometry item (.query r-tree env)
+              :when          (.equals item geo)]
+        (.remove r-tree env item)))))
+
 
 (defmethod q/pred-args-spec 'geo-nearest [_]
   (s/cat :pred-fn  #{'geo-nearest}
@@ -143,12 +161,13 @@
                                (q/bound-result-for-var index-snapshot % join-keys)
                                %)))]
         (when-some [geo (->geo geo-fac v)]
-          (->> (for [neighbor     (.nearestNeighbour r-tree
-                                                     (.getEnvelopeInternal geo)
-                                                     geo
-                                                     geo-dist
-                                                     (inc (or n 1)))
-                     :when        (not= geo neighbor)
+          (->> (for [neighbor     (->> (.nearestNeighbour r-tree
+                                                          (.getEnvelopeInternal geo)
+                                                          geo
+                                                          geo-dist
+                                                          (inc (or n 1)))
+                                       (remove #(.equals geo %))
+                                       (take (or n 1)))
                      :let         [neighbor-map (->geo-map neighbor)]
                      neighbor-eid (db/ave index-snapshot attr neighbor-map nil entity-resolver-fn)]
                  [(db/decode-value index-snapshot neighbor-eid) neighbor-map])
@@ -222,4 +241,6 @@
                      :crux.bus/executor (reify java.util.concurrent.Executor
                                           (execute [_ f]
                                             (.run f)))}
-                #(index! ctx (db/fetch-docs document-store (:doc-ids %))))))
+                #(do (index! ctx (db/fetch-docs document-store (:doc-ids %)))
+                     (when-some [eids (not-empty (:evicting-eids %))]
+                       (evict! ctx eids))))))

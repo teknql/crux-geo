@@ -2,7 +2,6 @@
   (:require [clojure.test :refer [deftest testing is use-fixtures]]
             [crux.api :as crux]
             [teknql.crux-geo :as sut]
-            [crux.db :as db]
             [clojure.java.io :as io]))
 
 (def ^:dynamic *node* nil)
@@ -113,12 +112,54 @@
       (.close *node*))
 
     (binding [*node* (crux/start-node node-cfg)]
-      (is (= [[:db.id/boston]]
+      (is (= #{[:db.id/boston]}
              (crux/q
                (crux/db *node*)
-               '{:find     [?nearest]
-                 :order-by [[?nearest :asc]]
-                 :where    [[?ny :crux.db/id :db.id/new-york]
-                            [?ny :city/location ?loc]
-                            [(geo-nearest :city/location ?loc) [[?nearest]]]]})))
+               '{:find  [?nearest]
+                 :where [[?ny :crux.db/id :db.id/new-york]
+                         [?ny :city/location ?loc]
+                         [(geo-nearest :city/location ?loc) [[?nearest]]]]})))
       (.close *node*))))
+
+(deftest update-test
+  (submit+await-tx (for [city cities] [:crux.tx/put city
+                                       #inst "2021-05-28T00:00"]))
+  (testing "allows querying across time"
+    (submit+await-tx
+      [[:crux.tx/put
+        {:crux.db/id :db.id/car
+         :car/location
+         {:geometry/type        :geometry.type/point
+          :geometry/coordinates [-73.874794 40.715855]}}
+        #inst "2021-05-28T12:00"]
+       [:crux.tx/put
+        {:crux.db/id :db.id/car
+         :car/location
+         {:geometry/type        :geometry.type/point
+          :geometry/coordinates [-71.434160 42.369838]}}
+        #inst "2021-05-28T14:00"]])
+
+    (let [nearest-at-start
+          (crux/q
+            (crux/db *node* #inst "2021-05-28T13:00")
+            '{:find  [?nearest]
+              :where [[?car :car/location ?loc]
+                      [(geo-nearest :city/location ?loc) [[?nearest]]]]})
+          nearest-now
+          (crux/q
+            (crux/db *node*)
+            '{:find  [?nearest]
+              :where [[?car :car/location ?loc]
+                      [(geo-nearest :city/location ?loc) [[?nearest]]]]})]
+      (is (= #{[:db.id/new-york]} nearest-at-start))
+      (is (= #{[:db.id/boston]} nearest-now)))
+
+    (submit+await-tx
+      [[:crux.tx/evict :db.id/boston]])
+
+    (is (= #{[:db.id/new-york]}
+           (crux/q
+             (crux/db *node*)
+             '{:find  [?nearest]
+               :where [[?car :car/location ?loc]
+                       [(geo-nearest :city/location ?loc) [[?nearest]]]]})))))
