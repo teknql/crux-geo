@@ -1,42 +1,92 @@
 (ns teknql.crux-geo
   (:require [crux.bus :as bus]
             [crux.codec :as cc]
-            [crux.db :as db]
-            [crux.io :as cio]
-            [crux.query :as q]
             [crux.system :as sys]
+            [crux.db :as db]
+            [crux.query :as q]
             [clojure.spec.alpha :as s])
   (:import [crux.query VarBinding]
            [org.locationtech.jts.index.strtree STRtree GeometryItemDistance]
-           [org.locationtech.jts.geom Geometry Point GeometryFactory PrecisionModel Coordinate]))
+           [org.locationtech.jts.geom Geometry Point GeometryFactory PrecisionModel
+            Coordinate LinearRing Polygon MultiPoint MultiPolygon LineString]))
 
 (defrecord DocID [a v])
 
 (def ^:private geo-factory
   (GeometryFactory. (PrecisionModel.) 4326))
 
+(defn- ->coordinate
+  "Return a coordinate from the provided `x y` vector."
+  [[x y]]
+  (Coordinate. x y))
+
+(defn- ->coordinates
+  "Return a java array of coordinates from the provided seqable of `[x y]` vectors"
+  [coords]
+  (into-array Coordinate (map ->coordinate coords)))
+
+(defn- ->polygon
+  "Return a geo polygon from the provided vector of vector of point vectors"
+  [geo-factory coords]
+  (let [linear-rings (map
+                       (fn [ring-coords]
+                         (.createLinearRing
+                           geo-factory
+                           (->coordinates ring-coords)))
+                       coords)]
+    (.createPolygon geo-factory (first linear-rings) (into-array LinearRing (rest linear-rings)))))
+
 (defn- ->geo
   "Return the provided map as a geometry"
-  [^GeometryFactory geo-factory m] ^Geometry
-  (when (map? m)
-    (let [coords (:geometry/coordinates m)]
-      (case (:geometry/type m)
-        :geometry.type/point (.createPoint geo-factory
-                                           (Coordinate. (nth coords 0) (nth coords 1)))
-        nil))))
+  ([m] (->geo geo-factory m))
+  ([^GeometryFactory geo-factory m] ^Geometry
+   (when (map? m)
+     (let [coords (:geometry/coordinates m)]
+       (case (:geometry/type m)
+         :geometry.type/point       (.createPoint geo-factory (->coordinate coords))
+         :geometry.type/multi-point (.createMultiPoint geo-factory (->coordinates coords))
+         :geometry.type/line-string (.createLineString geo-factory (->coordinates coords))
+         :geometry.type/polygon     (->polygon geo-factory coords)
+         :geometry.type/multi-polygon
+         (.createMultiPolygon
+           geo-factory (into-array Polygon (map (partial ->polygon geo-factory) coords)))
+         nil)))))
+
+(defn- coord->vec
+  "Return a coordinate as an x y vector"
+  [^Coordinate coord]
+  [(.-x coord) (.-y coord)])
 
 (defn- ->geo-map
   "Return the provided Geometry as a map"
   [geo]
-  (cond
-    (instance? Point geo) {:geometry/type        :geometry.type/point
-                           :geometry/coordinates [(.. geo getCoordinate -x)
-                                                  (.. geo getCoordinate -y)]}))
+  (condp instance? geo
+    Point        {:geometry/type        :geometry.type/point
+                  :geometry/coordinates (coord->vec (.getCoordinate geo))}
+    MultiPoint   {:geometry/type        :geometry.type/multi-point
+                  :geometry/coordinates (mapv coord->vec (.getCoordinates geo))}
+    LineString   {:geometry/type        :geometry.type/line-string
+                  :geometry/coordinates (mapv coord->vec (.getCoordinates geo))}
+    Polygon      {:geometry/type :geometry.type/polygon
+                  :geometry/coordinates
+                  (into [(mapv coord->vec (.. geo getExteriorRing getCoordinates))]
+                        (for [n (range (.getNumInteriorRing geo))]
+                          (mapv coord->vec (.. geo
+                                               (getInteriorRing n)
+                                               (getCoordinates)))))}
+    MultiPolygon {:geometry/type :geometry.type/multi-polygon
+                  :geometry/coordinates
+                  (vec
+                    (for [n    (range (.getNumGeometries geo))
+                          :let [{coords :geometry/coordinates}
+                                (->geo-map (.getGeometryN geo n))]]
+                      coords))}))
+
 
 (defn geo?
   "Return whether the provided map `m` can be interprited as a geometry"
   [m]
-  (some? (->geo geo-factory m)))
+  (some? (->geo m)))
 
 (defn a->rtree "Atomically grab the rtree from the provided ar-tree* atom"
   [ar-tree* a] ^STRtree
@@ -89,6 +139,37 @@
                                                      (inc (or n 1)))
                      :when        (not= geo neighbor)
                      :let         [neighbor-map (->geo-map neighbor)]
+                     neighbor-eid (db/ave index-snapshot attr neighbor-map nil entity-resolver-fn)]
+                 [(db/decode-value index-snapshot neighbor-eid) neighbor-map])
+               (q/bind-binding return-type tuple-idxs-in-join-order (get idx-id->idx idx-id))))))))
+
+
+(defmethod q/pred-args-spec 'geo-intersects [_]
+  (s/cat :pred-fn  #{'geo-intersects}
+         :args (s/spec (s/cat :attr keyword? :v (some-fn geo? symbol?)))
+         :return (s/? :crux.query/binding)))
+
+(defmethod q/pred-constraint 'geo-intersects [_ pred-ctx]
+  (let [{:keys [::geo-store
+                arg-bindings
+                return-type
+                tuple-idxs-in-join-order
+                idx-id]} pred-ctx
+        attr             (second arg-bindings)
+        r-tree           (a->rtree (:r-trees geo-store) attr)
+        geo-fac          (:geo-factory geo-store)]
+    (fn pred-get-attr-constraint [index-snapshot
+                                  {:keys [entity-resolver-fn]}
+                                  idx-id->idx join-keys]
+      (let [[v] (->> arg-bindings
+                     (drop 2)
+                     (map #(if (instance? VarBinding %)
+                             (q/bound-result-for-var index-snapshot % join-keys)
+                             %)))]
+        (when-some [geo (->geo geo-fac v)]
+          (->> (for [item         (.query r-tree (.getEnvelopeInternal geo))
+                     :when        (not= geo item)
+                     :let         [neighbor-map (->geo-map item)]
                      neighbor-eid (db/ave index-snapshot attr neighbor-map nil entity-resolver-fn)]
                  [(db/decode-value index-snapshot neighbor-eid) neighbor-map])
                (q/bind-binding return-type tuple-idxs-in-join-order (get idx-id->idx idx-id))))))))
