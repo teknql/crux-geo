@@ -17,17 +17,19 @@
 
 (defn- ->coordinate
   "Return a coordinate from the provided `x y` vector."
+  ^Coordinate
   [[x y]]
   (Coordinate. x y))
 
 (defn- ->coordinates
   "Return a java array of coordinates from the provided seqable of `[x y]` vectors"
+  ^"[Lorg.locationtech.jts.geom.Coordinate;"
   [coords]
   (into-array Coordinate (map ->coordinate coords)))
 
 (defn- ->polygon
   "Return a geo polygon from the provided vector of vector of point vectors"
-  [geo-factory coords]
+  [^GeometryFactory geo-factory coords]
   (let [linear-rings (map
                        (fn [ring-coords]
                          (.createLinearRing
@@ -39,7 +41,7 @@
 (defn- ->geo
   "Return the provided map as a geometry"
   ([m] (->geo geo-factory m))
-  ([^GeometryFactory geo-factory m] ^Geometry
+  (^Geometry [^GeometryFactory geo-factory m]
    (when (map? m)
      (let [coords (:geometry/coordinates m)]
        (case (:geometry/type m)
@@ -59,7 +61,7 @@
 
 (defn- ->geo-map
   "Return the provided Geometry as a map"
-  [geo]
+  [^Geometry geo]
   (condp instance? geo
     Point        {:geometry/type        :geometry.type/point
                   :geometry/coordinates (coord->vec (.getCoordinate geo))}
@@ -69,11 +71,12 @@
                   :geometry/coordinates (mapv coord->vec (.getCoordinates geo))}
     Polygon      {:geometry/type :geometry.type/polygon
                   :geometry/coordinates
-                  (into [(mapv coord->vec (.. geo getExteriorRing getCoordinates))]
-                        (for [n (range (.getNumInteriorRing geo))]
-                          (mapv coord->vec (.. geo
-                                               (getInteriorRing n)
-                                               (getCoordinates)))))}
+                  (let [^Polygon geo geo]
+                    (into [(mapv coord->vec (.. geo getExteriorRing getCoordinates))]
+                          (for [n (range (.getNumInteriorRing geo))]
+                            (mapv coord->vec (.. geo
+                                                 (getInteriorRingN n)
+                                                 (getCoordinates))))))}
     MultiPolygon {:geometry/type :geometry.type/multi-polygon
                   :geometry/coordinates
                   (vec
@@ -88,8 +91,10 @@
   [m]
   (some? (->geo m)))
 
-(defn a->rtree "Atomically grab the rtree from the provided ar-tree* atom"
-  [ar-tree* a] ^STRtree
+(defn a->rtree
+  "Atomically grab the rtree from the provided ar-tree* atom"
+  ^STRtree
+  [ar-tree* a]
   (swap! ar-tree* update a #(or % (STRtree.)))
   (get @ar-tree* a))
 
@@ -202,6 +207,3 @@
                                             (.run f)))}
                 #(index! ar-tree* geo-factory (db/fetch-docs document-store (:doc-ids %))))
     ar-tree*))
-
-(comment
-  (count (->id-str :location 5)))
