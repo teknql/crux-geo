@@ -18,15 +18,15 @@
        (crux/await-tx *node*)))
 
 (def cities
-  [{:crux.db/id :db.id/new-york
+  [{:crux.db/id :city.id/new-york
     :city/location
     {:geometry/type        :geometry.type/point
      :geometry/coordinates [-74.0060 40.7128]}}
-   {:crux.db/id :db.id/boston
+   {:crux.db/id :city.id/boston
     :city/location
     {:geometry/type        :geometry.type/point
      :geometry/coordinates [-71.0589 42.3601]}}
-   {:crux.db/id :db.id/chicago
+   {:crux.db/id :city.id/chicago
     :city/location
     {:geometry/type        :geometry.type/point
      :geometry/coordinates [-87.6298 41.8781]}}])
@@ -76,7 +76,7 @@
                      :in    [bounding-box]
                      :where [[(geo-intersects :city/location bounding-box) [[?city]]]]}
                    ny-bounding-box)]
-      (is (= #{[:db.id/new-york]} result)))))
+      (is (= #{[:city.id/new-york]} result)))))
 
 (deftest nearest-test
   (submit+await-tx (for [city cities] [:crux.tx/put city]))
@@ -88,17 +88,17 @@
                      :where    [[?city :city/location ?loc]
                                 [(geo-nearest :city/location ?loc) [[?nearest]]]]})]
       (is (= result
-             [[:db.id/boston :db.id/new-york]
-              [:db.id/chicago :db.id/new-york]
-              [:db.id/new-york :db.id/boston]]))))
+             [[:city.id/boston :city.id/new-york]
+              [:city.id/chicago :city.id/new-york]
+              [:city.id/new-york :city.id/boston]]))))
 
   (testing "returning multiple items"
-    (is (= [[:db.id/boston] [:db.id/chicago]]
+    (is (= [[:city.id/boston] [:city.id/chicago]]
            (crux/q
              (crux/db *node*)
              '{:find     [?nearest]
                :order-by [[?nearest :asc]]
-               :where    [[?ny :crux.db/id :db.id/new-york]
+               :where    [[?ny :crux.db/id :city.id/new-york]
                           [?ny :city/location ?loc]
                           [(geo-nearest :city/location ?loc 2) [[?nearest]]]]})))))
 
@@ -112,11 +112,11 @@
       (.close *node*))
 
     (binding [*node* (crux/start-node node-cfg)]
-      (is (= #{[:db.id/boston]}
+      (is (= #{[:city.id/boston]}
              (crux/q
                (crux/db *node*)
                '{:find  [?nearest]
-                 :where [[?ny :crux.db/id :db.id/new-york]
+                 :where [[?ny :crux.db/id :city.id/new-york]
                          [?ny :city/location ?loc]
                          [(geo-nearest :city/location ?loc) [[?nearest]]]]})))
       (.close *node*))))
@@ -151,13 +151,13 @@
             '{:find  [?nearest]
               :where [[?car :car/location ?loc]
                       [(geo-nearest :city/location ?loc) [[?nearest]]]]})]
-      (is (= #{[:db.id/new-york]} nearest-at-start))
-      (is (= #{[:db.id/boston]} nearest-now)))
+      (is (= #{[:city.id/new-york]} nearest-at-start))
+      (is (= #{[:city.id/boston]} nearest-now)))
 
     (submit+await-tx
-      [[:crux.tx/evict :db.id/boston]])
+      [[:crux.tx/evict :city.id/boston]])
 
-    (is (= #{[:db.id/new-york]}
+    (is (= #{[:city.id/new-york]}
            (crux/q
              (crux/db *node*)
              '{:find  [?nearest]
