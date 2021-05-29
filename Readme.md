@@ -1,4 +1,5 @@
 # crux-geo
+[![CI](https://github.com/teknql/crux-geo/actions/workflows/ci.yml/badge.svg)](https://github.com/teknql/crux-geo/actions/workflows/ci.yml)
 
 Geospatial indexing for [juxt/crux](https://github.com/juxt/crux).
 
