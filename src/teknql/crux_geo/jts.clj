@@ -3,8 +3,7 @@
   (:require [crux.system :as sys]
             [crux.db :as db]
             [teknql.crux-geo :refer [GeoBackend]])
-  (:import [crux.query VarBinding]
-           [org.locationtech.jts.index.strtree STRtree GeometryItemDistance]
+  (:import [org.locationtech.jts.index.strtree STRtree GeometryItemDistance]
            [org.locationtech.jts.geom Geometry Point GeometryFactory PrecisionModel
             Coordinate LinearRing Polygon MultiPoint MultiPolygon LineString]))
 
@@ -38,7 +37,7 @@
                        coords)]
     (.createPolygon geo-factory (first linear-rings) (into-array LinearRing (rest linear-rings)))))
 
-(defn- ->geo
+(defn ->geo
   "Return the provided map as a geometry"
   ([m] (->geo geo-factory m))
   (^Geometry [^GeometryFactory geo-factory m]
@@ -59,7 +58,7 @@
   [^Coordinate coord]
   [(.-x coord) (.-y coord)])
 
-(defn- ->geo-map
+(defn ->geo-map
   "Return the provided Geometry as a map"
   [^Geometry geo]
   (condp instance? geo
@@ -131,13 +130,15 @@
   [{:keys [index-store]}]
   (->JTSBackend
     (atom
-      (->> (with-open [index-snapshot (db/open-index-snapshot index-store)]
-             (for [attr (db/read-index-meta index-store ::known-attrs)
-                   :let [r-tree (STRtree.)]]
-               (do (doseq [v     (db/av index-snapshot attr nil)
-                           :let  [v (db/decode-value index-snapshot v)
-                                  ^Geometry geo (->geo v)]
-                           :when geo]
-                     (.insert r-tree (.getEnvelopeInternal geo) geo))
-                   [attr r-tree])))
-           (into {})))))
+      (let [attrs (db/read-index-meta index-store :teknql.crux-geo/known-attrs)]
+        (->> (with-open [index-snapshot (db/open-index-snapshot index-store)]
+               (doall
+                 (for [attr attrs
+                       :let [r-tree (STRtree.)]]
+                   (do (doseq [v     (db/av index-snapshot attr nil)
+                               :let  [v (db/decode-value index-snapshot v)
+                                      ^Geometry geo (->geo v)]
+                               :when geo]
+                         (.insert r-tree (.getEnvelopeInternal geo) geo))
+                       [attr r-tree]))))
+             (into {}))))))

@@ -3,8 +3,7 @@
             [crux.system :as sys]
             [crux.db :as db]
             [crux.query :as q]
-            [clojure.spec.alpha :as s]
-            [next.jdbc :as jdbc])
+            [clojure.spec.alpha :as s])
   (:import [crux.query VarBinding]))
 
 
@@ -31,10 +30,10 @@
            known-attrs]} docs]
   (doseq [[_id doc] docs
           [k v]     doc]
-    (when-not (@known-attrs k)
-      (db/store-index-meta index-store ::known-attrs
-                           (swap! known-attrs conj k)))
     (when (geo? v)
+      (when-not (@known-attrs k)
+        (db/store-index-meta index-store ::known-attrs
+                             (swap! known-attrs conj k)))
       (index-av! backend k v))))
 
 (defn evict!
@@ -104,7 +103,7 @@
                  :document-store :crux/document-store
                  :index-store    :crux/index-store
                  :query-engine   :crux/query-engine
-                 :backend        (fn [])}
+                 :backend        'teknql.crux-geo.jts/->backend}
    ::sys/before #{[:crux/tx-ingester]}}
   [{:keys [document-store bus query-engine index-store backend]}]
   (assert (satisfies? GeoBackend backend) "Invalid Backend provided")

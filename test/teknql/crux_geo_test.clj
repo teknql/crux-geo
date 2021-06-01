@@ -1,18 +1,30 @@
 (ns teknql.crux-geo-test
-  (:require [clojure.test :refer [deftest testing is use-fixtures]]
+  (:require [clojure.test :refer [deftest testing is]]
             [crux.api :as crux]
-            [teknql.crux-geo :as sut]
-            [clojure.java.io :as io]))
+            [clojure.string :as str])
+  (:import [java.nio.file Files]
+           [java.nio.file.attribute FileAttribute]))
 
 (def ^:dynamic *node* nil)
 
-(defn geo-fixture
-  [f]
-  (binding [*node* (crux/start-node
-                     {:teknql.crux-geo/geo-store
-                      {:backend {:crux/module 'teknql.crux-geo.jts/->backend}}})]
-    (f)
-    (.close *node*)))
+(def ^:dynamic *backend* nil)
+
+(defmacro def-backend-test
+  [name & body]
+  (let [backends ['teknql.crux-geo.jts/->backend
+                  'teknql.crux-geo.spatialite/->backend]
+        backend->name #(last (str/split (namespace %) #"\."))
+        tests (map (fn [backend]
+                    (let [backend-meta (keyword "backend" (backend->name backend))
+                          test-symbol  (symbol (str (backend->name backend) "-" name))]
+                      `(deftest ~(with-meta test-symbol {backend-meta true})
+                         (with-open [node# (crux/start-node
+                                             {:teknql.crux-geo/geo-store
+                                              {:backend {:crux/module  '~backend}}})]
+                           (binding [*node*    node#
+                                     *backend* '~backend]
+                             ~@body))))) backends)]
+    `(do ~@tests)))
 
 (defn submit+await-tx
   [tx]
@@ -42,9 +54,7 @@
      [-74.04853820800781 40.78834006798032]
      [-74.04853820800781 40.6920928987952]]]})
 
-(use-fixtures :each geo-fixture)
-
-(deftest intersects-test
+(def-backend-test intersects-test
   (submit+await-tx (for [city cities] [:crux.tx/put city]))
   (testing "returns intersecting geometries"
     (let [result (crux/q
@@ -55,7 +65,8 @@
                    ny-bounding-box)]
       (is (= #{[:city.id/new-york]} result)))))
 
-(deftest nearest-test
+
+(def-backend-test nearest-test
   (submit+await-tx (for [city cities] [:crux.tx/put city]))
   (testing "returns the nearest item"
     (let [result (crux/q
@@ -64,10 +75,10 @@
                      :order-by [[?city :asc]]
                      :where    [[?city :city/location ?loc]
                                 [(geo-nearest :city/location ?loc) [[?nearest]]]]})]
-      (is (= result
-             [[:city.id/boston :city.id/new-york]
+      (is (= [[:city.id/boston :city.id/new-york]
               [:city.id/chicago :city.id/new-york]
-              [:city.id/new-york :city.id/boston]]))))
+              [:city.id/new-york :city.id/boston]]
+             result))))
 
   (testing "returning multiple items"
     (is (= [[:city.id/boston] [:city.id/chicago]]
@@ -79,26 +90,37 @@
                           [?ny :city/location ?loc]
                           [(geo-nearest :city/location ?loc 2) [[?nearest]]]]})))))
 
-(deftest persistence-test
-  (let [node-cfg {:crux/index-store
+(def-backend-test persistence-test
+  (let [db-dir   (Files/createTempDirectory "crux-geo-store-persistence-test-db"
+                                            (into-array FileAttribute []))
+        be-opts (condp = *backend*
+                  'teknql.crux-geo.jts/->backend
+                  {:crux/module *backend*}
+                  'teknql.crux-geo.spatialite/->backend
+                  {:crux/module *backend*
+                   :db-path
+                   (str (Files/createTempFile "crux-geo-store-persistence-test-db"
+                                              ".sqlite"
+                                              (into-array FileAttribute [])))})
+        node-cfg {:crux/index-store
                   {:kv-store {:crux/module 'crux.rocksdb/->kv-store
-                              :db-dir      (io/file "/tmp/rocksdb")}}
-                  :teknql.crux-geo/geo-store {}}]
-    (binding [*node* (crux/start-node node-cfg)]
-      (submit+await-tx (for [city cities] [:crux.tx/put city]))
-      (.close *node*))
+                              :db-dir      db-dir}}
+                  :teknql.crux-geo/geo-store {:backend be-opts}}]
+    (with-open [node (crux/start-node node-cfg)]
+      (binding [*node* node]
+        (submit+await-tx (for [city cities] [:crux.tx/put city]))))
 
-    (binding [*node* (crux/start-node node-cfg)]
-      (is (= #{[:city.id/boston]}
-             (crux/q
-               (crux/db *node*)
-               '{:find  [?nearest]
-                 :where [[?ny :crux.db/id :city.id/new-york]
-                         [?ny :city/location ?loc]
-                         [(geo-nearest :city/location ?loc) [[?nearest]]]]})))
-      (.close *node*))))
+    (with-open [node (crux/start-node node-cfg)]
+      (binding [*node* node]
+        (is (= #{[:city.id/boston]}
+               (crux/q
+                 (crux/db *node*)
+                 '{:find  [?nearest]
+                   :where [[?ny :crux.db/id :city.id/new-york]
+                           [?ny :city/location ?loc]
+                           [(geo-nearest :city/location ?loc) [[?nearest]]]]})))))))
 
-(deftest update-test
+(def-backend-test update-test
   (submit+await-tx (for [city cities] [:crux.tx/put city
                                        #inst "2021-05-28T00:00"]))
   (testing "allows querying across time"
@@ -115,7 +137,6 @@
          {:geometry/type        :geometry.type/point
           :geometry/coordinates [-71.434160 42.369838]}}
         #inst "2021-05-28T14:00"]])
-
     (let [nearest-at-start
           (crux/q
             (crux/db *node* #inst "2021-05-28T13:00")
