@@ -1,7 +1,10 @@
 {:paths ["src"]
  :deps
- {org.locationtech.jts/jts-core {:mvn/version "1.18.1"}}
-
+ {org.locationtech.jts/jts-core     {:mvn/version "1.18.1"}
+  com.github.seancorfield/next.jdbc {:mvn/version "1.2.659"}
+  org.xerial/sqlite-jdbc            {:mvn/version "3.34.0"}
+  juxt/crux-core                    {:mvn/version "21.05-1.17.0-beta"}
+  juxt/crux-rocksdb                 {:mvn/version "21.05-1.17.0-beta"}}
  :aliases
  {:test
   {:extra-paths ["test"]

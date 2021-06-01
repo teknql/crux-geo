@@ -119,3 +119,23 @@
                 #(do (index! ctx (db/fetch-docs document-store (:doc-ids %)))
                      (when-some [eids (not-empty (:evicting-eids %))]
                        (evict! ctx eids))))))
+
+(comment
+  (def db
+    {:classname   "org.sqlite.JDBC"
+     :subprotocol "sqlite"
+     :subname     ":memory:"})
+  (def ds
+    (jdbc/get-datasource
+      {:dbtype                 "sqlite"
+       :dbname                 ":memory:"
+       "enable_shared_cache"   true
+       "enable_load_extension" true
+       "enable_spatialite"     true}))
+
+  (jdbc/execute!
+    ds
+    ["SELECT sqlite_version(), spatialite_version(), spatialite_target_cpu()"])
+  (jdbc/execute-one!
+    (jdbc/get-connection ds)
+    ["SELECT load_extension('/nix/store/czlsm3jgr5s96l8i0hzknpqk3ywppsrp-libspatialite-4.3.0a/lib/mod_spatialite')"]))

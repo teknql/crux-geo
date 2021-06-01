@@ -1,7 +1,6 @@
 (ns teknql.crux-geo-test
   (:require [clojure.test :refer [deftest testing is use-fixtures]]
             [crux.api :as crux]
-            [teknql.crux-geo :as sut]
             [clojure.java.io :as io]))
 
 (def ^:dynamic *node* nil)
