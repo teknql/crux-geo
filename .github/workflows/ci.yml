@@ -39,4 +39,4 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-build-${{ env.cache-name }}-
       - name: Run Tests
-        run: clojure -Atest -Mtest unit
+        run: clojure -Atest -Mtest unit --skip-meta :backend/spatialite

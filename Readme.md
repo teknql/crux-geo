@@ -133,12 +133,55 @@ with each other. Here is an example that uses a bounding box
 Similar to `geo-nearest`, `geo-intersects` can also return the value of the
 matched attribute as an additional argument to the binding tuple.
 
-## How It Works and Roadmap
+## Backends
 
-crux-geo is built on top of [JTS](https://github.com/locationtech/jts).
+### JTS (In-Memory, Pure Java)
+
+```clojure
+(crux/start-node
+  {:teknql.crux-geo/geo-store {}})
+```
+
+By default crux-geo will use a pure-java in-memory backend built on top
+of [JTS](https://github.com/locationtech/jts).
+
 Currently it stores all values in in-memory STRtrees partitioned by attribute.
 These trees are automatically re-built using the index stores at node startup.
 
-Ultimately we may explore using on-disk structures directly, as well as allow
-for configuration of different backends.
+Anecdotally indexing a collection of approximately 800K polygons uses approximately 400MB of memory.
 
+### Spatialite (SQLite, In-Memory or on Disk, Dynamically Linked)
+
+For larger datasets we recommend using Spatialite, a geo-spatial extension for
+Sqlite.
+
+To use this you must have sqlite3 (tested with `v3.35.5`) and spatialite (tested
+with `v5.0.1`) available on your system to be loaded dynamically at run time.
+
+You must also add the JNA bindings to your `deps.edn`:
+
+```clojure
+{com.github.gwenn/sqlite-jna {:mvn/version "0.2.0"}}
+```
+
+
+```clojure
+(crux/start-node
+  {:teknql.crux-geo/geo-store
+   {:backend
+    {:crux/module 'teknql.crux-geo.spatialite/->backend
+     :db-path "/tmp/geo.sqlite" ;; Or ":memory:" for in-memory
+     }}})
+```
+
+#### Note on why JNA vs JDBC
+
+Some may wonder why we chose to use the JNA bindings instead of the JDBC driver.
+The JDBC driver statically compiles sqlite3 and packages with its JAR.
+Spatialite, however, is not in that JAR, and the dynamically loaded version can
+then hit issues where the system provided sqlite3 library is not compatible with
+the version packaged in the JDBC driver, leading to JVM crashes. Rather than
+maintain our own version of the JDBC driver we decide leave the challenges of
+reproducible builds / runtime environments to other tools (operating system
+package managers, docker, nix) and instead just assume to be able to load it
+from the system path.
