@@ -1,4 +1,10 @@
 {:paths ["src"]
+ :pablo/config
+ {:group-id    com.teknql
+  :artifact-id crux-geo
+  :github      "teknql/crux-geo"
+  :desc        "Geospatial Indexing for Crux"
+  :target      :jar}
  :deps
  {org.locationtech.jts/jts-core {:mvn/version "1.18.1"}}
  :aliases

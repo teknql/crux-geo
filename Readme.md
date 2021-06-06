@@ -1,4 +1,5 @@
 # crux-geo
+[![Clojars Project](https://img.shields.io/clojars/v/com.teknql/crux-geo.svg)](https://clojars.org/com.teknql/crux-geo)
 [![CI](https://github.com/teknql/crux-geo/actions/workflows/ci.yml/badge.svg)](https://github.com/teknql/crux-geo/actions/workflows/ci.yml)
 
 Geospatial indexing for [juxt/crux](https://github.com/juxt/crux).
@@ -11,6 +12,11 @@ To use `crux-geo` simply add the `:teknql.crux-geo/geo-store` to your crux confi
 ```clojure
 (crux/start-node {:teknql.crux-geo/geo-store {}})
 ```
+
+## Status
+
+Currently in alpha. We believe the core functionality is there and are now seeking
+early feedback. Still, APIs may change before cutting a real release.
 
 ## Writing Data
 
