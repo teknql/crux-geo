@@ -105,18 +105,21 @@
          wkt (subs (str attr) 1) n]
         (comp ->geo-map wkt->geo))))
   (intersects [_ attr v]
-    (let [wkt (-> v ->geo ->wkt)]
+    (let [geo (-> v ->geo)
+          wkt (->wkt geo)]
       (-sql-query
         conn
         [(str "SELECT AsText(avs.v) as v FROM avs"
-              " WHERE Intersects(avs.v, ST_GeometryFromText(?, 4326))"
+              " WHERE avs.id IN ("
+              "  SELECT ROWID FROM SpatialIndex"
+              "  WHERE f_table_name ='avs' "
+              "  AND search_frame = ST_GeometryFromText(?, 4326))"
               " AND avs.v != ST_GeometryFromText(?, 4326)"
               " AND avs.a = ?")
-         wkt wkt (subs (str attr) 1)]
+         wkt
+         wkt
+         (subs (str attr) 1)]
         (comp ->geo-map wkt->geo)))))
-
-
-
 
 (defn ->backend
   "Return a JTS-based Driver for crux-geo"
