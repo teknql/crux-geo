@@ -16,6 +16,7 @@
 
 
 (defn geo?
+  "Return whether the provided map `m` appears to be a geometry."
   [m]
   (#{:geometry.type/point
      :geometry.type/multi-point
@@ -23,7 +24,7 @@
      :geometry.type/polygon
      :geometry.type/multi-polygon} (:geometry/type m)))
 
-(defn index!
+(defn- -index!
   "Index the provided documents into the passed in r-tree"
   [{:keys [backend
            index-store
@@ -36,7 +37,7 @@
                              (swap! known-attrs conj k)))
       (index-av! backend k v))))
 
-(defn evict!
+(defn- -evict!
   "Evict the provided document IDs"
   [{:keys [index-store
            backend]} eids]
@@ -115,6 +116,7 @@
                      :crux.bus/executor (reify java.util.concurrent.Executor
                                           (execute [_ f]
                                             (.run f)))}
-                #(do (index! ctx (db/fetch-docs document-store (:doc-ids %)))
-                     (when-some [eids (not-empty (:evicting-eids %))]
-                       (evict! ctx eids))))))
+                (fn [x]
+                  (-index! ctx (db/fetch-docs document-store (:doc-ids x)))
+                  (when-some [eids (not-empty (:evicting-eids x))]
+                    (-evict! ctx eids))))))

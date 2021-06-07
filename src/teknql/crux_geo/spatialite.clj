@@ -1,29 +1,9 @@
 (ns teknql.crux-geo.spatialite
   "Spatialite backend for crux-geo"
   (:require [teknql.crux-geo :refer [GeoBackend]]
-            [teknql.crux-geo.jts :refer [->geo ->geo-map]]
-            [crux.system :as sys])
-  (:import [org.locationtech.jts.io WKTWriter WKTReader]
-           [org.locationtech.jts.geom Geometry]
-           [org.sqlite Conn Stmt OpenFlags]))
-
-(def ^:private writer
-  "Static writer for WKT"
-  (WKTWriter.))
-
-(def ^:private reader
-  "Static reader for WKT"
-  (WKTReader.))
-
-(defn- ->wkt
-  "Convert a Geometry object into WKT representation"
-  [^Geometry geo]
-  (.write ^WKTWriter writer geo))
-
-(defn- wkt->geo
-  [^String wkt-text]
-  (.read ^WKTReader reader wkt-text))
-
+            [crux.system :as sys]
+            [teknql.crux-geo.encode :as encode])
+  (:import [org.sqlite Conn Stmt OpenFlags]))
 
 (defn- -sql-exec!
   "Execute the provided SQL"
@@ -84,32 +64,31 @@
       conn
       ["INSERT INTO avs (a, v) VALUES (?, ST_GeometryFromText(?, 4326))"
        (subs (str attr) 1)
-       (-> v ->geo ->wkt)]))
+       (encode/map->wkt v)]))
   (evict-av! [_ attr v]
     (-sql-exec!
       conn
       ["DELETE FROM avs WHERE avs.a = ? AND avs.v = ST_GeometryFromText(?, 4326)"
        (subs (str attr) 1)
-       (-> v ->geo ->wkt)]))
+       (encode/map->wkt v)]))
   (nearest-neighbors [_ attr v n]
     []
-    (let [wkt (-> v ->geo ->wkt)]
+    (let [wkt (encode/map->wkt v)]
       (-sql-query
         conn
-        [(str "SELECT AsText(avs.v) FROM knn JOIN avs ON knn.fid = avs.id WHERE knn.f_table_name = 'avs' "
+        [(str "SELECT AsWKT(avs.v) FROM knn JOIN avs ON knn.fid = avs.id WHERE knn.f_table_name = 'avs' "
               " AND knn.ref_geometry = ST_GeometryFromText(?, 4326)"
               " AND avs.v != knn.ref_geometry"
               " AND avs.a = ?"
               " ORDER BY knn.distance ASC"
               " LIMIT ?")
          wkt (subs (str attr) 1) n]
-        (comp ->geo-map wkt->geo))))
+        encode/wkt->map)))
   (intersects [_ attr v]
-    (let [geo (-> v ->geo)
-          wkt (->wkt geo)]
+    (let [wkt (encode/map->wkt v)]
       (-sql-query
         conn
-        [(str "SELECT AsText(avs.v) as v FROM avs"
+        [(str "SELECT AsWKT(avs.v) as v FROM avs"
               " WHERE avs.id IN ("
               "  SELECT ROWID FROM SpatialIndex"
               "  WHERE f_table_name ='avs' "
@@ -119,7 +98,7 @@
          wkt
          wkt
          (subs (str attr) 1)]
-        (comp ->geo-map wkt->geo)))))
+        encode/wkt->map))))
 
 (defn ->backend
   "Return a JTS-based Driver for crux-geo"
