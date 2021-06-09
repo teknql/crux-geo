@@ -2,18 +2,26 @@
   "Namespace for dealing with encoding / decoding"
   (:import [org.locationtech.jts.geom Geometry Point GeometryFactory PrecisionModel
             Coordinate LinearRing Polygon MultiPoint MultiPolygon LineString]
-           [org.locationtech.jts.io WKTWriter WKTReader]))
+           [org.locationtech.jts.io WKTWriter WKTReader WKBReader WKBWriter]))
 
 (def ^:private geo-factory
   (GeometryFactory. (PrecisionModel.) 4326))
 
-(def ^:private writer
+(def ^:private wkt-writer
   "Static writer for WKT"
   (WKTWriter.))
 
-(def ^:private reader
+(def ^:private wkt-reader
   "Static reader for WKT"
   (WKTReader.))
+
+(def ^:private wkb-writer
+  "Static reader for WKB"
+  (WKBWriter.))
+
+(def ^:private wkb-reader
+  "Static reader for WKB"
+  (WKBReader.))
 
 (defn- ->coordinate
   "Return a coordinate from the provided `x y` vector."
@@ -62,6 +70,18 @@
   [^Coordinate coord]
   [(.-x coord) (.-y coord)])
 
+(defn truncate
+  "Function to truncate overly precise geometries."
+  ([m] (truncate m 10))
+  ([m num-decimals]
+   (let [scale (Math/pow 10 num-decimals)]
+     (-> m
+         (update :geometry/coordinates
+                 #(mapv (fn truncator [x]
+                         (if (vector? x)
+                           (mapv truncator x)
+                           (/ (Math/round (* x scale)) scale))) %))))))
+
 (defn geo->map
   "Return the provided Geometry as a map"
   [^Geometry geo]
@@ -88,35 +108,46 @@
                                 (geo->map (.getGeometryN geo n))]]
                       coords))}))
 
-(defn truncate
-  "Function to truncate overly precise geometries."
-  ([m] (truncate m 10))
-  ([m num-decimals]
-   (let [scale (Math/pow 10 num-decimals)]
-     (-> m
-         (update :geometry/coordinates
-                 #(mapv (fn truncator [x]
-                         (if (vector? x)
-                           (mapv truncator x)
-                           (/ (Math/round (* x scale)) scale))) %))))))
-
 (defn geo->wkt
   "Convert a Geometry object into WKT representation"
   ^String
   [^Geometry geo]
-  (.write ^WKTWriter writer geo))
+  (.write ^WKTWriter wkt-writer geo))
+
+(defn geo->wkb
+  "Convert a geometry object into Extended Well Known-Binary format"
+  ^bytes
+  [^Geometry geo]
+  (.write ^WKBWriter wkb-writer geo))
+
+(set! *warn-on-reflection* true)
+
+(defn wkb->geo
+  "Convert Extended Well Known Binary into a Geometry"
+  ^Geometry
+  [^bytes bs]
+  (.read ^WKBReader wkb-reader bs))
 
 (defn wkt->geo
   "Convert WKT Text into a Geometry"
   ^Geometry
   [^String wkt-text]
-  (.read ^WKTReader reader wkt-text))
+  (.read ^WKTReader wkt-reader wkt-text))
 
 (def map->wkt
   "Convert a geometry map into WKT"
   ^String
   (comp geo->wkt map->geo))
 
+(def map->wkb
+  "Convert a geometry map into Well known binary"
+  ^bytes
+  (comp geo->wkb map->geo))
+
 (def wkt->map
   "Convert a WKT string into a geometry map"
   (comp geo->map wkt->geo))
+
+(def wkb->map
+  "Convert a map into Extended Well Known Binary Format"
+  (comp geo->map wkb->geo))

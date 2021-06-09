@@ -1,7 +1,8 @@
 (ns teknql.crux-geo-test
   (:require [clojure.test :refer [deftest testing is]]
             [crux.api :as crux]
-            [clojure.string :as str])
+            [clojure.string :as str]
+            [teknql.crux-geo.encode :as encode])
   (:import [java.nio.file Files]
            [java.nio.file.attribute FileAttribute]))
 
@@ -161,3 +162,18 @@
              '{:find  [?nearest]
                :where [[?car :car/location ?loc]
                        [(geo-nearest :city/location ?loc) [[?nearest]]]]})))))
+
+(def-backend-test overly-precise-test
+  (testing "supports extremely precise geometries"
+    (let [person {:crux.db/id      :person/peter
+                  :person/location {:geometry/type        :geometry.type/point
+                                    :geometry/coordinates [-73.9800585141354980468
+                                                           40.71250158910928987952]}}]
+      (submit+await-tx [[:crux.tx/put person]])
+      (let [result (crux/q
+                     (crux/db *node*)
+                     '{:find  [?person]
+                       :in    [bounding-box]
+                       :where [[(geo-intersects :person/location bounding-box) [[?person]]]]}
+                     ny-bounding-box)]
+        (is (= #{[:person/peter]} result))))))

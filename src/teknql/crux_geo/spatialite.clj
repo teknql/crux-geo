@@ -19,7 +19,7 @@
   [^Stmt stmt f]
   (let [results (transient [])]
     (while (.step stmt 60)
-      (let [item (.getColumnText stmt 0)]
+      (let [item (.getColumnBlob stmt 0)]
         (conj! results (f item))))
     (.reset stmt)
     (persistent! results)))
@@ -62,43 +62,44 @@
   (index-av! [_ attr v]
     (-sql-exec!
       conn
-      ["INSERT INTO avs (a, v) VALUES (?, ST_GeometryFromText(?, 4326))"
+      ["INSERT INTO avs (a, v) VALUES (?, GeomFromWKB(?, 4326))"
        (subs (str attr) 1)
-       (encode/map->wkt v)]))
+       (encode/map->wkb v)]))
   (evict-av! [_ attr v]
     (-sql-exec!
       conn
-      ["DELETE FROM avs WHERE avs.a = ? AND avs.v = ST_GeometryFromText(?, 4326)"
+      ["DELETE FROM avs WHERE avs.a = ? AND avs.v = GeomFromWKB(?, 4326)"
        (subs (str attr) 1)
-       (encode/map->wkt v)]))
+       (encode/map->wkb v)]))
   (nearest-neighbors [_ attr v n]
     []
-    (let [wkt (encode/map->wkt v)]
-      (-sql-query
-        conn
-        [(str "SELECT AsWKT(avs.v) FROM knn JOIN avs ON knn.fid = avs.id WHERE knn.f_table_name = 'avs' "
-              " AND knn.ref_geometry = ST_GeometryFromText(?, 4326)"
-              " AND avs.v != knn.ref_geometry"
-              " AND avs.a = ?"
-              " ORDER BY knn.distance ASC"
-              " LIMIT ?")
-         wkt (subs (str attr) 1) n]
-        encode/wkt->map)))
+    (-sql-query
+      conn
+      [(str "SELECT AsBinary(avs.v) FROM knn JOIN avs ON knn.fid = avs.id WHERE knn.f_table_name = 'avs' "
+            " AND knn.ref_geometry = GeomFromWKB(?, 4326)"
+            " AND avs.v != knn.ref_geometry"
+            " AND avs.a = ?"
+            " ORDER BY knn.distance ASC"
+            " LIMIT ?")
+       (encode/map->wkb v)
+       (subs (str attr) 1)
+       n]
+      encode/wkb->map))
   (intersects [_ attr v]
-    (let [wkt (encode/map->wkt v)]
+    (let [wkb (encode/map->wkb v)]
       (-sql-query
         conn
-        [(str "SELECT AsWKT(avs.v) as v FROM avs"
+        [(str "SELECT AsBinary(avs.v) as v FROM avs"
               " WHERE avs.id IN ("
               "  SELECT ROWID FROM SpatialIndex"
               "  WHERE f_table_name ='avs' "
-              "  AND search_frame = ST_GeometryFromText(?, 4326))"
-              " AND avs.v != ST_GeometryFromText(?, 4326)"
+              "  AND search_frame = GeomFromWKB(?, 4326))"
+              " AND avs.v != ST_GeometryFromWKB(?, 4326)"
               " AND avs.a = ?")
-         wkt
-         wkt
+         wkb
+         wkb
          (subs (str attr) 1)]
-        encode/wkt->map))))
+        encode/wkb->map))))
 
 (defn ->backend
   "Return a JTS-based Driver for crux-geo"

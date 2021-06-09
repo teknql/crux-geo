@@ -45,23 +45,6 @@ Below is an example of storing a city with a lng/lat point:
      :geometry/coordinates [-74.0060 40.7128]}}])
 ```
 
-#### A Note on Precision
-
-At extremely high precisions there can be information loss between what is
-stored in spatialite and what is stored in crux leading to situations where the
-data cannot be joined on.
-
-Currently we provide the `teknql.crux-geo.encode/truncate` function to truncate
-a geometry to a lower precision. There really only seems to be issues with
-geometries that have close to 13 decimals. Given that [9 decimal places
-approaches microspociy](https://gis.stackexchange.com/a/8674) this shouldn't be
-too much of an issue. The note is that you must truncate before you index into Crux.
-
-Another option that we have considered is storing the raw data inside sqlite so
-that it can be recovered without any rounding that spatialite performs. The
-downside here is that it seems wasteful to be storing it, but opinions on this
-are something that we are actively seeking feedback on.
-
 ## Querying Data
 
 crux-geo provides a range of useful query operations. For a potentially more
